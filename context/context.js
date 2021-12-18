@@ -1,21 +1,41 @@
 import React from 'react';
 import { createContext, useState } from "react";
-// import server from "../axios/server";
-import AudioRecorderPlayer, {
-    AVEncoderAudioQualityIOSType,
-    AVEncodingOption,
-    AudioEncoderAndroidType,
-    AudioSet,
-    AudioSourceAndroidType,
-} from 'react-native-audio-recorder-player';
+import axios from "../axios/server";
+import { Audio } from 'expo-av';
+import * as FileSystem from "expo-file-system";
+
 
 
 const Context = createContext(null);
 
 export const Provider = ({ children }) => {
     const [error, setError] = useState("heyo");
-    const [token, setToken] = useState(null);
-    const [user, setUser] = useState({});
+    const [token, setToken] = useState("Not Recording");
+    const [status, setStatus] = useState();
+    const whatsEmotion = (num) => {
+        switch (num) {
+            case '1':
+                return "Neutral"
+
+            case '2':
+                return "Disgust"
+
+            case '3':
+                return "Happy"
+
+            case '4':
+                return "Sad"
+
+            case '5':
+                return "Angry"
+            case '6':
+                return "Fearful"
+
+            default:
+                return "Neutrall"
+        }
+    }
+
     const [audioDetails, setAudioDetails] = useState(
         {
             isLoggingIn: false,
@@ -28,49 +48,76 @@ export const Provider = ({ children }) => {
         });
 
 
-    const onStartRecord = async (audioRecorderPlayer) => {
-        const path = 'hello.m4a';
-        const audioSet = {
-            AudioEncoderAndroid: AudioEncoderAndroidType.AAC,
-            AudioSourceAndroid: AudioSourceAndroidType.MIC,
-            AVEncoderAudioQualityKeyIOS: AVEncoderAudioQualityIOSType.high,
-            AVNumberOfChannelsKeyIOS: 2,
-            AVFormatIDKeyIOS: AVEncodingOption.aac,
-        };
+    const [recording, setRecording] = React.useState();
+    const onStartRecord = async () => {
 
-        console.log('audioSet', audioSet);
-
-        const uri = await audioRecorderPlayer.startRecorder(path, audioSet);
-        audioRecorderPlayer.addRecordBackListener((e) => {
-            setAudioDetails({
-                ...audioDetails,
-                recordSecs: e.current_position,
-                recordTime: audioRecorderPlayer.mmssss(
-                    Math.floor(e.current_position),
-                ),
+        try {
+            setToken('Requesting permissions..');
+            await Audio.requestPermissionsAsync();
+            await Audio.setAudioModeAsync({
+                allowsRecordingIOS: true,
+                playsInSilentModeIOS: true,
             });
-        });
+            setToken('Starting recording..');
+            const { recording, status } = await Audio.Recording.createAsync(
+                {
+                    ...Audio.RECORDING_OPTIONS_PRESET_LOW_QUALITY,
+                    ios: {
+                        ...Audio.RECORDING_OPTIONS_PRESET_LOW_QUALITY.ios,
+                        sampleRate: 48000,
+                        numberOfChannels: 1
+                    }
 
-        console.log(`uri: ${uri}`);
+                }
+            );
+            setRecording(recording);
+            setStatus(status);
+            setToken("Recording");
+
+        } catch (err) {
+            console.error('Failed to start recording', err);
+        }
 
     };
 
-    const onStopRecord = async (audioRecorderPlayer) => {
-        const result = await audioRecorderPlayer.stopRecorder();
-        audioRecorderPlayer.removeRecordBackListener();
-        setAudioDetails({
-            ...audioDetails,
-            recordSecs: 0,
-        });
-        console.log(result);
+    const onStopRecord = async () => {
+        setToken('Stopping recording..');
+
+        setRecording(undefined);
+        await recording.stopAndUnloadAsync();
+        const uri = recording.getURI();
+        setToken('Recording stopped ');
+        try {
+
+            var a = await FileSystem.uploadAsync("http://50d2-31-161-187-93.ngrok.io", uri, {
+                uploadType: FileSystem.FileSystemUploadType.MULTIPART,
+                headers: {
+                    Accept: 'application/json',
+                    'Content-Type': 'multipart/form-data',
+                },
+                sessionType: FileSystem.FileSystemSessionType.BACKGROUND,
+                httpMethod: "post",
+                fieldName: `audio`,
+                parameters: { "name": ` S${Math.floor(Math.random() * 1000)}` }
+            });
+            const data = JSON.parse(a.body).data
+
+            const emotion = data[0];
+            setToken(`Emotion: ${whatsEmotion(emotion)}\n Confidence ${data.substring(1, 4)}%`);
+        } catch (error) {
+            console.error(error);
+        }
     };
 
 
     const values = {
         error,
+        token,
         audioDetails,
         onStartRecord,
-        onStopRecord
+        onStopRecord,
+        recording,
+        status
     };
 
     return <Context.Provider value={values}>{children}</Context.Provider>;
